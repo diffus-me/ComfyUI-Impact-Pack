@@ -9,6 +9,8 @@ import torch
 import numpy as np
 import logging
 
+import execution_context
+
 
 class TiledKSamplerProvider:
     @classmethod
@@ -24,7 +26,11 @@ class TiledKSamplerProvider:
                     "tile_height": ("INT", {"default": 512, "min": 320, "max": MAX_RESOLUTION, "step": 64, "tooltip": "Sets the height of the tile to be used in TiledKSampler."}),
                     "tiling_strategy": (["random", "padded", 'simple'], {"tooltip": "Sets the tiling strategy for TiledKSampler."} ),
                     "basic_pipe": ("BASIC_PIPE", {"tooltip": "basic_pipe input for sampling"})
-                    }}
+                    },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT",
+            }
+        }
 
     OUTPUT_TOOLTIPS = ("sampler wrapper. (Can be used when generating a regional_prompt.)", )
 
@@ -35,10 +41,11 @@ class TiledKSamplerProvider:
 
     @staticmethod
     def doit(seed, steps, cfg, sampler_name, scheduler, denoise,
-             tile_width, tile_height, tiling_strategy, basic_pipe):
+             tile_width, tile_height, tiling_strategy, basic_pipe,
+             context: execution_context.ExecutionContext):
         model, _, _, positive, negative = basic_pipe
         sampler = core.TiledKSamplerWrapper(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, denoise,
-                                            tile_width, tile_height, tiling_strategy)
+                                            tile_width, tile_height, tiling_strategy, context=context)
         return (sampler, )
 
 
@@ -149,6 +156,9 @@ class TwoAdvancedSamplersForMask:
                      "mask": ("MASK", {"tooltip": "region mask"}),
                      "overlap_factor": ("INT", {"default": 10, "min": 0, "max": 10000, "tooltip": "To smooth the seams of the region boundaries, expand the mask by the overlap_factor amount to overlap with other regions."})
                      },
+                "hidden": {
+                    "context": "EXECUTION_CONTEXT"
+                    },
                 }
 
     OUTPUT_TOOLTIPS = ("result latent", )
@@ -300,7 +310,7 @@ class RegionalSampler:
                      "additional_sampler": (["AUTO", "euler", "heun", "heunpp2", "dpm_2", "dpm_fast", "dpmpp_2m", "ddpm"], {"tooltip": "1) AUTO: Automatically set the recovery sampler. If the sampler is uni_pc, uni_pc_bh2, dpmpp_sde, dpmpp_sde_gpu, the dpm_fast sampler is selected If the sampler is dpmpp_2m_sde, dpmpp_2m_sde_gpu, dpmpp_3m_sde, dpmpp_3m_sde_gpu, the dpmpp_2m sampler is selected. 2) Others: Manually set the recovery sampler."}),
                      "additional_sigma_ratio": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Multiplier of noise schedule to be applied according to additional_mode."}),
                      },
-                "hidden": {"unique_id": "UNIQUE_ID"},
+                "hidden": {"unique_id": "UNIQUE_ID", "context": "EXECUTION_CONTEXT"},
                 }
 
     OUTPUT_TOOLTIPS = ("result latent", )
@@ -334,7 +344,8 @@ class RegionalSampler:
 
     @staticmethod
     def doit(seed, seed_2nd, seed_2nd_mode, steps, base_only_steps, denoise, samples, base_sampler, regional_prompts, overlap_factor, restore_latent,
-             additional_mode, additional_sampler, additional_sigma_ratio, unique_id=None):
+             additional_mode, additional_sampler, additional_sigma_ratio, unique_id=None,
+             context: execution_context.ExecutionContext = None):
 
         samples = samples.copy()
         samples['samples'] = comfy.sample.fix_empty_latent_channels(base_sampler.params[0], samples['samples'])
@@ -366,7 +377,7 @@ class RegionalSampler:
             for rp in regional_prompts:
                 noise = rp.touch_noise(noise)
 
-            samples = base_sampler.sample_advanced(True, seed, adv_steps, samples, start_at_step, start_at_step + base_only_steps, leftover_noise, recovery_mode="DISABLE", noise=noise)
+            samples = base_sampler.sample_advanced(context, True, seed, adv_steps, samples, start_at_step, start_at_step + base_only_steps, leftover_noise, recovery_mode="DISABLE", noise=noise)
 
         if seed_2nd_mode == "seed+seed_2nd":
             seed += seed_2nd
@@ -396,7 +407,7 @@ class RegionalSampler:
             core.update_node_status(unique_id, f"{i}/{steps} steps  |         ", ((i-start_at_step)*region_len)/total)
 
             new_latent_image['noise_mask'] = inv_mask
-            new_latent_image = base_sampler.sample_advanced(add_noise, seed, adv_steps, new_latent_image,
+            new_latent_image = base_sampler.sample_advanced(context, add_noise, seed, adv_steps, new_latent_image,
                                                             start_at_step=i, end_at_step=i + 1, return_with_leftover_noise=True,
                                                             recovery_mode=additional_mode, recovery_sampler=additional_sampler, recovery_sigma_ratio=additional_sigma_ratio, noise=noise)
 
@@ -415,7 +426,7 @@ class RegionalSampler:
                 region_mask = regional_prompt.get_mask_erosion(overlap_factor).squeeze(0).squeeze(0)
 
                 new_latent_image['noise_mask'] = region_mask
-                new_latent_image = regional_prompt.sampler.sample_advanced(False, seed, adv_steps, new_latent_image, i, i + 1, True,
+                new_latent_image = regional_prompt.sampler.sample_advanced(context, False, seed, adv_steps, new_latent_image, i, i + 1, True,
                                                                            recovery_mode=additional_mode, recovery_sampler=additional_sampler, recovery_sigma_ratio=additional_sigma_ratio)
 
                 if restore_latent:
@@ -435,7 +446,7 @@ class RegionalSampler:
             base_latent_image = new_latent_image
 
         new_latent_image['noise_mask'] = inv_mask
-        new_latent_image = base_sampler.sample_advanced(False, seed, adv_steps, new_latent_image, adv_steps, adv_steps+1, False,
+        new_latent_image = base_sampler.sample_advanced(context, False, seed, adv_steps, new_latent_image, adv_steps, adv_steps+1, False,
                                                         recovery_mode=additional_mode, recovery_sampler=additional_sampler, recovery_sigma_ratio=additional_sigma_ratio)
 
         core.update_node_status(unique_id, f"{steps}/{steps} steps", total)
@@ -469,7 +480,10 @@ class RegionalSamplerAdvanced:
                      "additional_sampler": (["AUTO", "euler", "heun", "heunpp2", "dpm_2", "dpm_fast", "dpmpp_2m", "ddpm"], {"tooltip": "1) AUTO: Automatically set the recovery sampler. If the sampler is uni_pc, uni_pc_bh2, dpmpp_sde, dpmpp_sde_gpu, the dpm_fast sampler is selected If the sampler is dpmpp_2m_sde, dpmpp_2m_sde_gpu, dpmpp_3m_sde, dpmpp_3m_sde_gpu, the dpmpp_2m sampler is selected. 2) Others: Manually set the recovery sampler."}),
                      "additional_sigma_ratio": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Multiplier of noise schedule to be applied according to additional_mode."}),
                      },
-                 "hidden": {"unique_id": "UNIQUE_ID"},
+                 "hidden": {
+                     "unique_id": "UNIQUE_ID",
+                     "context": "EXECUTION_CONTEXT"
+                    },
                 }
 
     OUTPUT_TOOLTIPS = ("result latent", )
@@ -481,7 +495,7 @@ class RegionalSamplerAdvanced:
 
     @staticmethod
     def doit(add_noise, noise_seed, steps, start_at_step, end_at_step, overlap_factor, restore_latent, return_with_leftover_noise, latent_image, base_sampler, regional_prompts,
-             additional_mode, additional_sampler, additional_sigma_ratio, unique_id):
+             additional_mode, additional_sampler, additional_sigma_ratio, unique_id, context: execution_context.ExecutionContext):
 
         new_latent_image = latent_image.copy()
         new_latent_image['samples'] = comfy.sample.fix_empty_latent_channels(base_sampler.params[0], new_latent_image['samples'])
@@ -517,7 +531,7 @@ class RegionalSamplerAdvanced:
                 noise = None
 
             new_latent_image['noise_mask'] = inv_mask
-            new_latent_image = base_sampler.sample_advanced(cur_add_noise, noise_seed, steps, new_latent_image, i, i + 1, True,
+            new_latent_image = base_sampler.sample_advanced(context, cur_add_noise, noise_seed, steps, new_latent_image, i, i + 1, True,
                                                             recovery_mode=additional_mode, recovery_sampler=additional_sampler, recovery_sigma_ratio=additional_sigma_ratio, noise=noise)
 
             if restore_latent:
@@ -538,7 +552,7 @@ class RegionalSamplerAdvanced:
                     region_mask = region_masks[j]
 
                 new_latent_image['noise_mask'] = region_mask
-                new_latent_image = regional_prompt.sampler.sample_advanced(False, noise_seed, steps, new_latent_image, i, i + 1, True,
+                new_latent_image = regional_prompt.sampler.sample_advanced(context, False, noise_seed, steps, new_latent_image, i, i + 1, True,
                                                                            recovery_mode=additional_mode, recovery_sampler=additional_sampler, recovery_sigma_ratio=additional_sigma_ratio)
 
                 if restore_latent:
@@ -556,7 +570,7 @@ class RegionalSamplerAdvanced:
             base_latent_image = new_latent_image
 
         new_latent_image['noise_mask'] = inv_mask
-        new_latent_image = base_sampler.sample_advanced(False, noise_seed, steps, new_latent_image, end_at_step-1, end_at_step, return_with_leftover_noise,
+        new_latent_image = base_sampler.sample_advanced(context, False, noise_seed, steps, new_latent_image, end_at_step-1, end_at_step, return_with_leftover_noise,
                                                         recovery_mode=additional_mode, recovery_sampler=additional_sampler, recovery_sigma_ratio=additional_sigma_ratio)
 
         core.update_node_status(unique_id, f"{end_at_step}/{end_at_step} steps", total)
@@ -587,7 +601,10 @@ class KSamplerBasicPipe:
                 "optional":
                     {
                         "scheduler_func_opt": ("SCHEDULER_FUNC", {"tooltip": "[OPTIONAL] Noise schedule generation function. If this is set, the scheduler widget will be ignored."}),
-                    }
+                    },
+                "hidden": {
+                        "context": "EXECUTION_CONTEXT"
+                    },
                 }
 
     OUTPUT_TOOLTIPS = ("passthrough input basic_pipe", "result latent", "VAE in basic_pipe")
@@ -598,9 +615,10 @@ class KSamplerBasicPipe:
     CATEGORY = "ImpactPack/sampling"
 
     @staticmethod
-    def sample(basic_pipe, seed, steps, cfg, sampler_name, scheduler, latent_image, denoise=1.0, scheduler_func_opt=None):
+    def sample(basic_pipe, seed, steps, cfg, sampler_name, scheduler, latent_image, denoise=1.0, scheduler_func_opt=None,
+               context: execution_context.ExecutionContext = None):
         model, clip, vae, positive, negative = basic_pipe
-        latent = impact_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise, scheduler_func=scheduler_func_opt)
+        latent = impact_sample(context, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise, scheduler_func=scheduler_func_opt)
         return basic_pipe, latent, vae
 
 
@@ -623,7 +641,11 @@ class KSamplerAdvancedBasicPipe:
                 "optional":
                     {
                         "scheduler_func_opt": ("SCHEDULER_FUNC", {"tooltip": "[OPTIONAL] Noise schedule generation function. If this is set, the scheduler widget will be ignored."}),
-                    }
+                    },
+                "hidden":
+                    {
+                        "context": "EXECUTION_CONTEXT"
+                    },
                 }
 
     OUTPUT_TOOLTIPS = ("passthrough input basic_pipe", "result latent", "VAE in basic_pipe")
@@ -634,10 +656,11 @@ class KSamplerAdvancedBasicPipe:
     CATEGORY = "ImpactPack/sampling"
 
     @staticmethod
-    def sample(basic_pipe, add_noise, noise_seed, steps, cfg, sampler_name, scheduler, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0, scheduler_func_opt=None):
+    def sample(basic_pipe, add_noise, noise_seed, steps, cfg, sampler_name, scheduler, latent_image, start_at_step, end_at_step, return_with_leftover_noise, denoise=1.0, scheduler_func_opt=None,
+               context: execution_context.ExecutionContext = None):
         model, clip, vae, positive, negative = basic_pipe
 
-        latent = separated_sample(model, add_noise, noise_seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, scheduler_func=scheduler_func_opt)
+        latent = separated_sample(context, model, add_noise, noise_seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, start_at_step, end_at_step, return_with_leftover_noise, scheduler_func=scheduler_func_opt)
         return basic_pipe, latent, vae
 
 

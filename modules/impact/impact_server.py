@@ -20,6 +20,10 @@ from impact.utils import to_tensor
 from PIL import Image
 from segment_anything import SamPredictor, sam_model_registry
 from server import PromptServer
+import logging
+
+import execution_context
+
 
 sam_predictor = None
 default_sam_model_name = os.path.join(impact_pack.model_path, "sams", "sam_vit_b_01ec64.pth")
@@ -29,7 +33,7 @@ sam_lock = threading.Condition()
 last_prepare_data = None
 
 
-def async_prepare_sam(image_dir, model_name, filename):
+def async_prepare_sam(context: execution_context.ExecutionContext, image_dir, model_name, filename):
     with sam_lock:
         global sam_predictor
 
@@ -44,7 +48,7 @@ def async_prepare_sam(image_dir, model_name, filename):
         sam_predictor = SamPredictor(sam_model)
 
         image_path = os.path.join(image_dir, filename)
-        image = nodes.LoadImage().load_image(image_path)[0]
+        image = nodes.LoadImage().load_image(image_path, context)[0]
         image = np.clip(255. * image.cpu().numpy().squeeze(), 0, 255).astype(np.uint8)
 
         if impact.config.get_config()['sam_editor_cpu']:
@@ -62,7 +66,7 @@ async def sam_prepare(request):
     global sam_predictor
     global last_prepare_data
     data = await request.json()
-
+    context = execution_context.ExecutionContext(request)
     with sam_lock:
         if last_prepare_data is not None and last_prepare_data == data:
             # already loaded: skip -- prevent redundant loading
@@ -74,7 +78,7 @@ async def sam_prepare(request):
         if data['sam_model_name'] == 'auto':
             model_name = impact.config.get_config()['sam_editor_model']
 
-        model_path = folder_paths.get_full_path("sams", model_name)
+        model_path = folder_paths.get_full_path(context, "sams", model_name)
 
         if model_path is None:
             logging.error(f"[Impact Pack] The '{model_name}' model file cannot be found in any sams model path.")
@@ -82,18 +86,18 @@ async def sam_prepare(request):
 
         logging.info(f"[Impact Pack] Loading SAM model '{model_path}'")
 
-        filename, image_dir = folder_paths.annotated_filepath(data["filename"])
+        filename, image_dir = folder_paths.annotated_filepath(data["filename"], context.user_hash)
 
         if image_dir is None:
             typ = data['type'] if data['type'] != '' else 'output'
-            image_dir = folder_paths.get_directory_by_type(typ)
+            image_dir = folder_paths.get_directory_by_type(typ, context.user_hash)
             if data['subfolder'] is not None and data['subfolder'] != '':
                 image_dir += f"/{data['subfolder']}"
 
         if image_dir is None:
             return web.Response(status=400)
 
-        thread = threading.Thread(target=async_prepare_sam, args=(image_dir, model_path, filename,))
+        thread = threading.Thread(target=async_prepare_sam, args=(context, image_dir, model_path, filename,))
         thread.start()
 
         logging.info("[Impact Pack] SAM model loaded. ")
@@ -233,16 +237,17 @@ async def segs_picker(request):
 
 @PromptServer.instance.routes.get("/view/validate")
 async def view_validate(request):
+    context = execution_context.ExecutionContext(request)
     if "filename" in request.rel_url.query:
         filename = request.rel_url.query["filename"]
         subfolder = request.rel_url.query["subfolder"]
-        filename, base_dir = folder_paths.annotated_filepath(filename)
+        filename, base_dir = folder_paths.annotated_filepath(filename, context.user_hash)
 
         if filename == '' or filename[0] == '/' or '..' in filename:
             return web.Response(status=400)
 
         if base_dir is None:
-            base_dir = folder_paths.get_input_directory()
+            base_dir = folder_paths.get_input_directory(context.user_hash)
 
         file = os.path.join(base_dir, subfolder, filename)
 
@@ -269,24 +274,25 @@ async def view_pb_id_image(request):
 
 @PromptServer.instance.routes.get("/impact/set/pb_id_image")
 async def set_previewbridge_image(request):
+    context = execution_context.ExecutionContext(request)
     try:
         if "filename" in request.rel_url.query:
             node_id = request.rel_url.query["node_id"]
             filename = request.rel_url.query["filename"]
             path_type = request.rel_url.query["type"]
             subfolder = request.rel_url.query["subfolder"]
-            filename, output_dir = folder_paths.annotated_filepath(filename)
+            filename, output_dir = folder_paths.annotated_filepath(filename, context.user_hash)
 
             if filename == '' or filename[0] == '/' or '..' in filename:
                 return web.Response(status=400)
 
             if output_dir is None:
                 if path_type == 'input':
-                    output_dir = folder_paths.get_input_directory()
+                    output_dir = folder_paths.get_input_directory(context.user_hash)
                 elif path_type == 'output':
-                    output_dir = folder_paths.get_output_directory()
+                    output_dir = folder_paths.get_output_directory(context.user_hash)
                 else:
-                    output_dir = folder_paths.get_temp_directory()
+                    output_dir = folder_paths.get_temp_directory(context.user_hash)
 
             file = os.path.join(output_dir, subfolder, filename)
             item = {
@@ -501,10 +507,10 @@ def find_input_value(input_node, prompt, input_type=int, input_keys=('value',)):
                 input_val = find_input_value(prompt[input_val[0]], prompt=prompt, input_type=input_type, input_keys=input_keys)
                 if input_val is not None:
                     break
-        
+
     except Exception as e :
         logging.warning(f"[Impact Pack] Error encountered on find {input_type} value - {e}")
-    
+
     return input_val
 
 

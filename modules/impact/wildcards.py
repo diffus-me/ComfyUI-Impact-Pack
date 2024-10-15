@@ -9,6 +9,9 @@ import nodes
 import numpy as np
 import yaml
 from impact import config, utils
+import logging
+
+import execution_context
 
 wildcards_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "wildcards"))
 
@@ -902,12 +905,12 @@ def remove_lora_tags(string):
     return result
 
 
-def resolve_lora_name(lora_name_cache, name):
+def resolve_lora_name(context: execution_context.ExecutionContext, lora_name_cache, name):
     if os.path.exists(name):
         return name
     else:
         if len(lora_name_cache) == 0:
-            lora_name_cache.extend(folder_paths.get_filename_list("loras"))
+            lora_name_cache.extend(folder_paths.get_filename_list(context, "loras"))
 
         for x in lora_name_cache:
             if x.endswith(name):
@@ -916,10 +919,11 @@ def resolve_lora_name(lora_name_cache, name):
     return None
 
 
-def process_with_loras(wildcard_opt, model, clip, clip_encoder=None, seed=None, processed=None):
+def process_with_loras(context, wildcard_opt, model, clip, clip_encoder=None, seed=None, processed=None):
     """
     process wildcard text including loras
 
+    :param context: execution context
     :param wildcard_opt: wildcard text
     :param model: model
     :param clip: clip
@@ -941,10 +945,10 @@ def process_with_loras(wildcard_opt, model, clip, clip_encoder=None, seed=None, 
             lora_name = lora_name+".safetensors"
 
         orig_lora_name = lora_name
-        lora_name = resolve_lora_name(lora_name_cache, lora_name)
+        lora_name = resolve_lora_name(context, lora_name_cache, lora_name)
 
         if lora_name is not None:
-            path = folder_paths.get_full_path("loras", lora_name)
+            path = folder_paths.get_full_path(context, "loras", lora_name)
         else:
             path = None
 
@@ -956,12 +960,12 @@ def process_with_loras(wildcard_opt, model, clip, clip_encoder=None, seed=None, 
                     if 'NunchakuFluxLoraLoader' not in nodes.NODE_CLASS_MAPPINGS:
                         logging.warning("To use `LOADER=nunchaku`, 'ComfyUI-nunchaku' is required. The LOADER= attribute is being ignored.")
                     cls = nodes.NODE_CLASS_MAPPINGS['NunchakuFluxLoraLoader']
-                    model = cls().load_lora(model, lora_name, model_weight)[0]
+                    model = cls().load_lora(model, lora_name, model_weight, context)[0]
                 else:
                     logging.warning(f"LORA LOADER NOT FOUND: '{loader}'")
             else:
                 def default_lora():
-                    return nodes.LoraLoader().load_lora(model, clip, lora_name, model_weight, clip_weight)
+                    return nodes.LoraLoader().load_lora(model, clip, lora_name, model_weight, clip_weight, context=context)
 
                 if lbw is not None:
                     if 'LoraLoaderBlockWeight //Inspire' not in nodes.NODE_CLASS_MAPPINGS:

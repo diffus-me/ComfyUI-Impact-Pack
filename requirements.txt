@@ -2,7 +2,7 @@ segment-anything
 scikit-image
 piexif
 transformers
-opencv-python-headless
+opencv-python-headless[ffmpeg]
 scipy
 numpy
 dill

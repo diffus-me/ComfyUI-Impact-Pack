@@ -71,9 +71,9 @@ NODE_CLASS_MAPPINGS = {
 
     "DetailerForEach": DetailerForEach, # noqa: F405
     "DetailerForEachAutoRetry": DetailerForEachAutoRetry, # noqa: F405
-    "DetailerForEachDebug": DetailerForEachTest, # noqa: F405
+    # "DetailerForEachDebug": DetailerForEachTest, # noqa: F405
     "DetailerForEachPipe": DetailerForEachPipe, # noqa: F405
-    "DetailerForEachDebugPipe": DetailerForEachTestPipe, # noqa: F405
+    # "DetailerForEachDebugPipe": DetailerForEachTestPipe, # noqa: F405
     "DetailerForEachPipeForAnimateDiff": DetailerForEachPipeForAnimateDiff, # noqa: F405
 
     "SAMDetectorCombined": SAMDetectorCombined, # noqa: F405
