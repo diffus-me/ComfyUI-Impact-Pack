@@ -13,7 +13,7 @@ if sys.argv[0] == 'install.py':
 
 impact_path = os.path.join(os.path.dirname(__file__), "modules")
 subpack_path = os.path.join(os.path.dirname(__file__), "impact_subpack")
-subpack_repo = "https://github.com/ltdrdata/ComfyUI-Impact-Subpack"
+subpack_repo = "git@github.com:diffus-me/ComfyUI-Impact-Subpack.git"
 
 
 comfy_path = os.environ.get('COMFYUI_PATH')

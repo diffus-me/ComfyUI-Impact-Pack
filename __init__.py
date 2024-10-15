@@ -83,9 +83,9 @@ NODE_CLASS_MAPPINGS = {
     "SubtractMaskForEach": SubtractMaskForEach,
 
     "DetailerForEach": DetailerForEach,
-    "DetailerForEachDebug": DetailerForEachTest,
+    # "DetailerForEachDebug": DetailerForEachTest,
     "DetailerForEachPipe": DetailerForEachPipe,
-    "DetailerForEachDebugPipe": DetailerForEachTestPipe,
+    # "DetailerForEachDebugPipe": DetailerForEachTestPipe,
     "DetailerForEachPipeForAnimateDiff": DetailerForEachPipeForAnimateDiff,
 
     "SAMDetectorCombined": SAMDetectorCombined,

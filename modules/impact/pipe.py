@@ -1,3 +1,4 @@
+import execution_context
 import folder_paths
 import impact.wildcards
 from impact.utils import any_typ
@@ -5,7 +6,7 @@ from impact.utils import any_typ
 
 class ToDetailerPipe:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
                      "model": ("MODEL",),
                      "clip": ("CLIP",),
@@ -14,7 +15,7 @@ class ToDetailerPipe:
                      "negative": ("CONDITIONING",),
                      "bbox_detector": ("BBOX_DETECTOR", ),
                      "wildcard": ("STRING", {"multiline": True, "dynamicPrompts": False}),
-                     "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list("loras"),),
+                     "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list(context, "loras"),),
                      "Select to add Wildcard": (["Select the Wildcard to add to the text"], ),
                      },
                 "optional": {
@@ -39,7 +40,7 @@ class ToDetailerPipe:
 
 class ToDetailerPipeSDXL(ToDetailerPipe):
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
                      "model": ("MODEL",),
                      "clip": ("CLIP",),
@@ -52,7 +53,7 @@ class ToDetailerPipeSDXL(ToDetailerPipe):
                      "refiner_negative": ("CONDITIONING",),
                      "bbox_detector": ("BBOX_DETECTOR", ),
                      "wildcard": ("STRING", {"multiline": True, "dynamicPrompts": False}),
-                     "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list("loras"),),
+                     "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list(context, "loras"),),
                      "Select to add Wildcard": (["Select the Wildcard to add to the text"],),
                      },
                 "optional": {
@@ -184,11 +185,11 @@ class FromBasicPipe_v2:
 
 class BasicPipeToDetailerPipe:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {"basic_pipe": ("BASIC_PIPE",),
                              "bbox_detector": ("BBOX_DETECTOR", ),
                              "wildcard": ("STRING", {"multiline": True, "dynamicPrompts": False}),
-                             "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list("loras"),),
+                             "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list(context, "loras"),),
                              "Select to add Wildcard": (["Select the Wildcard to add to the text"],),
                              },
                 "optional": {
@@ -219,12 +220,12 @@ class BasicPipeToDetailerPipe:
 
 class BasicPipeToDetailerPipeSDXL:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {"base_basic_pipe": ("BASIC_PIPE",),
                              "refiner_basic_pipe": ("BASIC_PIPE",),
                              "bbox_detector": ("BBOX_DETECTOR", ),
                              "wildcard": ("STRING", {"multiline": True, "dynamicPrompts": False}),
-                             "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list("loras"),),
+                             "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list(context, "loras"),),
                              "Select to add Wildcard": (["Select the Wildcard to add to the text"],),
                              },
                 "optional": {
@@ -318,12 +319,12 @@ class EditBasicPipe:
 
 class EditDetailerPipe:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {
             "required": {
                 "detailer_pipe": ("DETAILER_PIPE",),
                 "wildcard": ("STRING", {"multiline": True, "dynamicPrompts": False}),
-                "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list("loras"),),
+                "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list(context, "loras"),),
                 "Select to add Wildcard": (["Select the Wildcard to add to the text"],),
             },
             "optional": {
@@ -415,12 +416,12 @@ class EditDetailerPipe:
 
 class EditDetailerPipeSDXL(EditDetailerPipe):
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {
             "required": {
                 "detailer_pipe": ("DETAILER_PIPE",),
                 "wildcard": ("STRING", {"multiline": True, "dynamicPrompts": False}),
-                "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list("loras"),),
+                "Select to add LoRA": (["Select the LoRA to add to the text"] + folder_paths.get_filename_list(context, "loras"),),
                 "Select to add Wildcard": (["Select the Wildcard to add to the text"],),
             },
             "optional": {

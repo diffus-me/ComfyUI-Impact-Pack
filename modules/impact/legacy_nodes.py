@@ -1,3 +1,4 @@
+import execution_context
 import folder_paths
 
 import impact.mmdet_nodes as mmdet_nodes
@@ -16,10 +17,11 @@ class NO_SEGM_MODEL:
 
 class MMDetLoader:
     @classmethod
-    def INPUT_TYPES(s):
-        bboxs = ["bbox/"+x for x in folder_paths.get_filename_list("mmdets_bbox")]
-        segms = ["segm/"+x for x in folder_paths.get_filename_list("mmdets_segm")]
-        return {"required": {"model_name": (bboxs + segms, )}}
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
+        bboxs = ["bbox/"+x for x in folder_paths.get_filename_list(context, "mmdets_bbox")]
+        segms = ["segm/"+x for x in folder_paths.get_filename_list(context, "mmdets_segm")]
+        return {"required": {"model_name": (bboxs + segms, )},
+                "hidden": {"context": "EXECUTION_CONTEXT"}}
     RETURN_TYPES = ("BBOX_MODEL", "SEGM_MODEL")
     FUNCTION = "load_mmdet"
 
@@ -27,8 +29,8 @@ class MMDetLoader:
 
     DEPRECATED = True
 
-    def load_mmdet(self, model_name):
-        mmdet_path = folder_paths.get_full_path("mmdets", model_name)
+    def load_mmdet(self, model_name, context: execution_context.ExecutionContext):
+        mmdet_path = folder_paths.get_full_path(context, "mmdets", model_name)
         model = mmdet_nodes.load_mmdet(mmdet_path)
 
         if model_name.startswith("bbox"):
@@ -222,12 +224,16 @@ class MaskPainter(nodes.PreviewImage):
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {"images": ("IMAGE",), },
+                "optional": {
+                    "mask_image": ("IMAGE_PATH",),
+                    "image": (["#placeholder"], ),
+                    "filename_prefix": ("STRING", {"default": "ComfyUI"}),
+                },
                 "hidden": {
                     "prompt": "PROMPT",
                     "extra_pnginfo": "EXTRA_PNGINFO",
+                    "context": "EXECUTION_CONTEXT",
                 },
-                "optional": {"mask_image": ("IMAGE_PATH",), },
-                "optional": {"image": (["#placeholder"], )},
                 }
 
     RETURN_TYPES = ("MASK",)
@@ -238,11 +244,12 @@ class MaskPainter(nodes.PreviewImage):
 
     DEPRECATED = True
 
-    def save_painted_images(self, images, filename_prefix="impact-mask",
-                            prompt=None, extra_pnginfo=None, mask_image=None, image=None):
+    def save_painted_images(self, images, mask_image=None, image=None, filename_prefix="impact-mask",
+                            prompt=None, extra_pnginfo=None,
+                            context: execution_context.ExecutionContext=None):
         if image == "#placeholder" or image['image_hash'] != id(images):
             # new input image
-            res = self.save_images(images, filename_prefix, prompt, extra_pnginfo)
+            res = self.save_images(images, filename_prefix, prompt, extra_pnginfo, user_hash=context.user_hash)
 
             item = res['ui']['images'][0]
 

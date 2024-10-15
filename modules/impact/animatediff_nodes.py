@@ -1,3 +1,4 @@
+import execution_context
 from nodes import MAX_RESOLUTION
 from impact.utils import *
 import impact.core as core
@@ -34,7 +35,10 @@ class SEGSDetailerForAnimateDiff:
                      "refiner_basic_pipe_opt": ("BASIC_PIPE",),
                      "noise_mask_feather": ("INT", {"default": 20, "min": 0, "max": 100, "step": 1}),
                      "scheduler_func_opt": ("SCHEDULER_FUNC",),
-                     }
+                     },
+                "hidden": {
+                    "context": "EXECUTION_CONTEXT"
+                    },
                 }
 
     RETURN_TYPES = ("SEGS", "IMAGE")
@@ -47,7 +51,8 @@ class SEGSDetailerForAnimateDiff:
 
     @staticmethod
     def do_detail(image_frames, segs, guide_size, guide_size_for, max_size, seed, steps, cfg, sampler_name, scheduler,
-                  denoise, basic_pipe, refiner_ratio=None, refiner_basic_pipe_opt=None, noise_mask_feather=0, scheduler_func_opt=None):
+                  denoise, basic_pipe, refiner_ratio=None, refiner_basic_pipe_opt=None, noise_mask_feather=0, scheduler_func_opt=None,
+                  context: execution_context.ExecutionContext = None):
 
         model, clip, vae, positive, negative = basic_pipe
         if refiner_basic_pipe_opt is None:
@@ -94,7 +99,7 @@ class SEGSDetailerForAnimateDiff:
                 for condition, details in negative
             ]
 
-            enhanced_image_tensor, cnet_images = core.enhance_detail_for_animatediff(cropped_image_frames, model, clip, vae, guide_size, guide_size_for, max_size,
+            enhanced_image_tensor, cnet_images = core.enhance_detail_for_animatediff(context, cropped_image_frames, model, clip, vae, guide_size, guide_size_for, max_size,
                                                                                      seg.bbox, seed, steps, cfg, sampler_name, scheduler,
                                                                                      cropped_positive, cropped_negative, denoise, seg.cropped_mask,
                                                                                      refiner_ratio=refiner_ratio, refiner_model=refiner_model,
@@ -151,7 +156,10 @@ class DetailerForEachPipeForAnimateDiff:
                       "refiner_basic_pipe_opt": ("BASIC_PIPE",),
                       "noise_mask_feather": ("INT", {"default": 20, "min": 0, "max": 100, "step": 1}),
                       "scheduler_func_opt": ("SCHEDULER_FUNC",),
-                      }
+                      },
+                "hidden": {
+                    "context": "EXECUTION_CONTEXT",
+                    }
                 }
 
     RETURN_TYPES = ("IMAGE", "SEGS", "BASIC_PIPE", "IMAGE")
@@ -164,7 +172,8 @@ class DetailerForEachPipeForAnimateDiff:
     @staticmethod
     def doit(image_frames, segs, guide_size, guide_size_for, max_size, seed, steps, cfg, sampler_name, scheduler,
              denoise, feather, basic_pipe, refiner_ratio=None, detailer_hook=None, refiner_basic_pipe_opt=None,
-             noise_mask_feather=0, scheduler_func_opt=None):
+             noise_mask_feather=0, scheduler_func_opt=None,
+             context: execution_context.ExecutionContext=None):
 
         enhanced_segs = []
         cnet_image_list = []
@@ -180,7 +189,7 @@ class DetailerForEachPipeForAnimateDiff:
                 cnet_image_list.extend(cnet_images)
 
             if detailer_hook is not None:
-                image_frames = detailer_hook.post_paste(image_frames)
+                image_frames = detailer_hook.post_paste(context, image_frames)
 
             enhanced_segs += enhanced_seg[1]
 

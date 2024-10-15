@@ -1,5 +1,7 @@
 import os
 from PIL import ImageOps
+
+import execution_context
 from impact.utils import *
 import latent_preview
 
@@ -23,7 +25,7 @@ class PreviewBridge:
                     "block": ("BOOLEAN", {"default": False, "label_on": "if_empty_mask", "label_off": "never", "tooltip": "is_empty_mask: If the mask is empty, the execution is stopped.\nnever: The execution is never stopped."}),
                     "restore_mask": (["never", "always", "if_same_size"], {"tooltip": "if_same_size: If the changed input image is the same size as the previous image, restore using the last saved mask\nalways: Whenever the input image changes, always restore using the last saved mask\nnever: Do not restore the mask.\n`restore_mask` has higher priority than `block`"}),
                     },
-                "hidden": {"unique_id": "UNIQUE_ID", "extra_pnginfo": "EXTRA_PNGINFO"},
+                "hidden": {"unique_id": "UNIQUE_ID", "extra_pnginfo": "EXTRA_PNGINFO", "context": "EXECUTION_CONTEXT"},
                 }
 
     RETURN_TYPES = ("IMAGE", "MASK", )
@@ -38,7 +40,6 @@ class PreviewBridge:
 
     def __init__(self):
         super().__init__()
-        self.output_dir = folder_paths.get_temp_directory()
         self.type = "temp"
         self.prev_hash = None
 
@@ -76,7 +77,7 @@ class PreviewBridge:
 
         return image, mask.unsqueeze(0), ui_item
 
-    def doit(self, images, image, unique_id, block=False, restore_mask="never", prompt=None, extra_pnginfo=None):
+    def doit(self, images, image, unique_id, block=False, restore_mask="never", prompt=None, extra_pnginfo=None, context: execution_context.ExecutionContext=None):
         need_refresh = False
 
         if unique_id not in core.preview_bridge_cache:
@@ -98,18 +99,18 @@ class PreviewBridge:
 
             if mask is None:
                 mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
-                res = nodes.PreviewImage().save_images(images, filename_prefix="PreviewBridge/PB-", prompt=prompt, extra_pnginfo=extra_pnginfo)
+                res = nodes.PreviewImage().save_images(images, filename_prefix="PreviewBridge/PB-", prompt=prompt, extra_pnginfo=extra_pnginfo, context=context)
             else:
                 masked_images = tensor_convert_rgba(images)
                 resized_mask = resize_mask(mask, (images.shape[1], images.shape[2])).unsqueeze(3)
                 resized_mask = 1 - resized_mask
                 tensor_putalpha(masked_images, resized_mask)
-                res = nodes.PreviewImage().save_images(masked_images, filename_prefix="PreviewBridge/PB-", prompt=prompt, extra_pnginfo=extra_pnginfo)
+                res = nodes.PreviewImage().save_images(masked_images, filename_prefix="PreviewBridge/PB-", prompt=prompt, extra_pnginfo=extra_pnginfo, context=context)
 
             image2 = res['ui']['images']
             pixels = images
 
-            path = os.path.join(folder_paths.get_temp_directory(), 'PreviewBridge', image2[0]['filename'])
+            path = os.path.join(folder_paths.get_temp_directory(context.user_hash), 'PreviewBridge', image2[0]['filename'])
             core.set_previewbridge_image(unique_id, path, image2[0])
             core.preview_bridge_image_id_map[image] = (path, image2[0])
             core.preview_bridge_image_name_map[unique_id, path] = (image, image2[0])
@@ -137,7 +138,7 @@ class PreviewBridge:
         }
 
 
-def decode_latent(latent, preview_method, vae_opt=None):
+def decode_latent(context: execution_context.ExecutionContext, latent, preview_method, vae_opt=None):
     if vae_opt is not None:
         image = nodes.VAEDecode().decode(vae_opt, latent)[0]
         return image
@@ -191,7 +192,7 @@ def decode_latent(latent, preview_method, vae_opt=None):
         latent_format = latent_formats.SD15()
         method = LatentPreviewMethod.Latent2RGB
 
-    previewer = core.get_previewer("cpu", latent_format=latent_format, force=True, method=method)
+    previewer = core.get_previewer(context, "cpu", latent_format=latent_format, force=True, method=method)
     samples = latent_format.process_in(latent['samples'])
 
     pil_image = previewer.decode_latent_to_preview(samples)
@@ -218,7 +219,7 @@ class PreviewBridgeLatent:
                     "block": ("BOOLEAN", {"default": False, "label_on": "if_empty_mask", "label_off": "never", "tooltip": "is_empty_mask: If the mask is empty, the execution is stopped.\nnever: The execution is never stopped. Instead, it returns a white mask."}),
                     "restore_mask": (["never", "always", "if_same_size"], {"tooltip": "if_same_size: If the changed input latent is the same size as the previous latent, restore using the last saved mask\nalways: Whenever the input latent changes, always restore using the last saved mask\nnever: Do not restore the mask.\n`restore_mask` has higher priority than `block`\nIf the input latent already has a mask, do not restore mask."}),
                 },
-                "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+                "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "context": "EXECUTION_CONTEXT"},
                 }
 
     RETURN_TYPES = ("LATENT", "MASK", )
@@ -233,7 +234,6 @@ class PreviewBridgeLatent:
 
     def __init__(self):
         super().__init__()
-        self.output_dir = folder_paths.get_temp_directory()
         self.type = "temp"
         self.prev_hash = None
         self.prefix_append = "_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for x in range(5))
@@ -272,7 +272,7 @@ class PreviewBridgeLatent:
 
         return image, mask, ui_item
 
-    def doit(self, latent, image, preview_method, vae_opt=None, block=False, unique_id=None, restore_mask='never', prompt=None, extra_pnginfo=None):
+    def doit(self, latent, image, preview_method, vae_opt=None, block=False, unique_id=None, restore_mask='never', prompt=None, extra_pnginfo=None, context: execution_context.ExecutionContext = None):
         latent_channels = latent['samples'].shape[1]
         preview_method_channels = 16 if 'SD3' in preview_method or 'SC-Prior' in preview_method or 'FLUX.1' in preview_method or 'TAEF1' == preview_method else 4
 
@@ -311,7 +311,7 @@ class PreviewBridgeLatent:
 
             res_image = [path_item]
         else:
-            decoded_image = decode_latent(latent, preview_method, vae_opt)
+            decoded_image = decode_latent(context, latent, preview_method, vae_opt)
 
             if 'noise_mask' in latent:
                 mask = latent['noise_mask'].squeeze(0)  # 4D mask -> 3D mask
@@ -322,7 +322,7 @@ class PreviewBridgeLatent:
                 resized_mask = resize_mask(inverted_mask, (decoded_image.shape[1], decoded_image.shape[2]))
                 result_pil = apply_mask_alpha_to_pil(decoded_pil, resized_mask)
 
-                full_output_folder, filename, counter, _, _ = folder_paths.get_save_image_path("PreviewBridge/PBL-"+self.prefix_append, folder_paths.get_temp_directory(), result_pil.size[0], result_pil.size[1])
+                full_output_folder, filename, counter, _, _ = folder_paths.get_save_image_path("PreviewBridge/PBL-"+self.prefix_append, folder_paths.get_temp_directory(context.user_hash), result_pil.size[0], result_pil.size[1])
                 file = f"{filename}_{counter}.png"
                 result_pil.save(os.path.join(full_output_folder, file), compress_level=4)
                 res_image = [{
@@ -342,19 +342,19 @@ class PreviewBridgeLatent:
 
                 if mask is None:
                     mask = torch.ones(latent['samples'].shape[2:], dtype=torch.float32, device="cpu").unsqueeze(0)
-                    res = nodes.PreviewImage().save_images(decoded_image, filename_prefix="PreviewBridge/PBL-", prompt=prompt, extra_pnginfo=extra_pnginfo)
+                    res = nodes.PreviewImage().save_images(decoded_image, filename_prefix="PreviewBridge/PBL-", prompt=prompt, extra_pnginfo=extra_pnginfo, context=context)
                 else:
                     masked_images = tensor_convert_rgba(decoded_image)
                     resized_mask = resize_mask(mask, (decoded_image.shape[1], decoded_image.shape[2])).unsqueeze(3)
                     resized_mask = 1 - resized_mask
                     tensor_putalpha(masked_images, resized_mask)
-                    res = nodes.PreviewImage().save_images(masked_images, filename_prefix="PreviewBridge/PBL-", prompt=prompt, extra_pnginfo=extra_pnginfo)
+                    res = nodes.PreviewImage().save_images(masked_images, filename_prefix="PreviewBridge/PBL-", prompt=prompt, extra_pnginfo=extra_pnginfo, context=context)
 
                 res_image = res['ui']['images']
 
             is_empty_mask = torch.all(mask == 1)
 
-            path = os.path.join(folder_paths.get_temp_directory(), 'PreviewBridge', res_image[0]['filename'])
+            path = os.path.join(folder_paths.get_temp_directory(context.user_hash), 'PreviewBridge', res_image[0]['filename'])
             core.set_previewbridge_image(unique_id, path, res_image[0])
             core.preview_bridge_image_id_map[image] = (path, res_image[0])
             core.preview_bridge_image_name_map[unique_id, path] = (image, res_image[0])

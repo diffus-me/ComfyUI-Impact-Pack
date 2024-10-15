@@ -1,5 +1,7 @@
 import copy
 import torch
+
+import execution_context
 import nodes
 from impact import utils
 from . import segs_nodes
@@ -99,9 +101,9 @@ class DetailerHookCombine(PixelKSampleHookCombine):
         segs = self.hook2.post_detection(segs)
         return segs
 
-    def post_paste(self, image):
-        image = self.hook1.post_paste(image)
-        image = self.hook2.post_paste(image)
+    def post_paste(self, context: execution_context.ExecutionContext, image):
+        image = self.hook1.post_paste(context, image)
+        image = self.hook2.post_paste(context, image)
         return image
 
     def get_custom_noise(self, seed, noise, is_touched):
@@ -167,7 +169,7 @@ class DetailerHook(PixelKSampleHook):
     def post_detection(self, segs):
         return segs
 
-    def post_paste(self, image):
+    def post_paste(self, context: execution_context.ExecutionContext, image):
         return image
 
     def get_custom_noise(self, seed, noise, is_touched):
@@ -492,12 +494,12 @@ class PreviewDetailerHook(DetailerHook):
         self.node_id = node_id
         self.quality = quality
 
-    async def send(self, image):
+    async def send(self, context: execution_context.ExecutionContext, image):
         if len(image) > 0:
             image = image[0].unsqueeze(0)
         img = utils.tensor2pil(image)
 
-        temp_path = os.path.join(folder_paths.get_temp_directory(), 'pvhook')
+        temp_path = os.path.join(folder_paths.get_temp_directory(context), 'pvhook')
 
         if not os.path.exists(temp_path):
             os.makedirs(temp_path)
@@ -513,6 +515,6 @@ class PreviewDetailerHook(DetailerHook):
 
         PromptServer.instance.send_sync("impact-preview", {'node_id': self.node_id, 'item': item})
 
-    def post_paste(self, image):
-        asyncio.run(self.send(image))
+    def post_paste(self, context: execution_context.ExecutionContext, image):
+        asyncio.run(self.send(context, image))
         return image

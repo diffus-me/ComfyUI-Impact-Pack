@@ -1,6 +1,7 @@
 import os
 import sys
 
+import execution_context
 import impact.impact_server
 from nodes import MAX_RESOLUTION
 
@@ -49,7 +50,8 @@ class SEGSDetailer:
                      "inpaint_model": ("BOOLEAN", {"default": False, "label_on": "enabled", "label_off": "disabled"}),
                      "noise_mask_feather": ("INT", {"default": 20, "min": 0, "max": 100, "step": 1}),
                      "scheduler_func_opt": ("SCHEDULER_FUNC",),
-                     }
+                     },
+                "hidden": {"context": "EXECUTION_CONTEXT"}
                 }
 
     RETURN_TYPES = ("SEGS", "IMAGE")
@@ -63,7 +65,8 @@ class SEGSDetailer:
     @staticmethod
     def do_detail(image, segs, guide_size, guide_size_for, max_size, seed, steps, cfg, sampler_name, scheduler,
                   denoise, noise_mask, force_inpaint, basic_pipe, refiner_ratio=None, batch_size=1, cycle=1,
-                  refiner_basic_pipe_opt=None, inpaint_model=False, noise_mask_feather=0, scheduler_func_opt=None):
+                  refiner_basic_pipe_opt=None, inpaint_model=False, noise_mask_feather=0, scheduler_func_opt=None,
+                  context: execution_context.ExecutionContext=None):
 
         model, clip, vae, positive, negative = basic_pipe
         if refiner_basic_pipe_opt is None:
@@ -113,7 +116,7 @@ class SEGSDetailer:
                     for condition, details in negative
                 ]
 
-                enhanced_image, cnet_pils = core.enhance_detail(cropped_image, model, clip, vae, guide_size, guide_size_for, max_size,
+                enhanced_image, cnet_pils = core.enhance_detail(context, cropped_image, model, clip, vae, guide_size, guide_size_for, max_size,
                                                                 seg.bbox, seed, steps, cfg, sampler_name, scheduler,
                                                                 cropped_positive, cropped_negative, denoise, cropped_mask, force_inpaint,
                                                                 refiner_ratio=refiner_ratio, refiner_model=refiner_model,
@@ -226,12 +229,12 @@ class SEGSPaste:
 
 class SEGSPreviewCNet:
     def __init__(self):
-        self.output_dir = folder_paths.get_temp_directory()
         self.type = "temp"
 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"segs": ("SEGS", ),}, }
+        return {"required": {"segs": ("SEGS", ),},
+                "hidden": {"context": "EXECUTION_CONTEXT"},}
 
     RETURN_TYPES = ("IMAGE", )
     OUTPUT_IS_LIST = (True, )
@@ -241,9 +244,10 @@ class SEGSPreviewCNet:
 
     OUTPUT_NODE = True
 
-    def doit(self, segs):
+    def doit(self, segs, context: execution_context.ExecutionContext):
+        output_dir = folder_paths.get_temp_directory(context.user_hash)
         full_output_folder, filename, counter, subfolder, filename_prefix = \
-            folder_paths.get_save_image_path("impact_seg_preview", self.output_dir, segs[0][1], segs[0][0])
+            folder_paths.get_save_image_path("impact_seg_preview", output_dir, segs[0][1], segs[0][0])
 
         results = list()
         result_image_list = []
@@ -273,7 +277,6 @@ class SEGSPreviewCNet:
 
 class SEGSPreview:
     def __init__(self):
-        self.output_dir = folder_paths.get_temp_directory()
         self.type = "temp"
 
     @classmethod
@@ -285,6 +288,9 @@ class SEGSPreview:
                     },
                 "optional": {
                      "fallback_image_opt": ("IMAGE", ),
+                    },
+                "hidden": {
+                    "context": "EXECUTION_CONTEXT"
                     }
                 }
 
@@ -296,9 +302,10 @@ class SEGSPreview:
 
     OUTPUT_NODE = True
 
-    def doit(self, segs, alpha_mode=True, min_alpha=0.0, fallback_image_opt=None):
+    def doit(self, segs, alpha_mode=True, min_alpha=0.0, fallback_image_opt=None, context: execution_context.ExecutionContext=None):
+        output_dir = folder_paths.get_temp_directory(context.user_hash)
         full_output_folder, filename, counter, subfolder, filename_prefix = \
-            folder_paths.get_save_image_path("impact_seg_preview", self.output_dir, segs[0][1], segs[0][0])
+            folder_paths.get_save_image_path("impact_seg_preview", output_dir, segs[0][1], segs[0][0])
 
         results = list()
         result_image_list = []
@@ -1818,7 +1825,8 @@ class SEGSUpscaler:
                     "upscale_model_opt": ("UPSCALE_MODEL",),
                     "upscaler_hook_opt": ("UPSCALER_HOOK",),
                     "scheduler_func_opt": ("SCHEDULER_FUNC",),
-                    }
+                    },
+                "hidden": {"context": "EXECUTION_CONTEXT"},
                 }
 
     RETURN_TYPES = ("IMAGE",)
@@ -1829,7 +1837,8 @@ class SEGSUpscaler:
     @staticmethod
     def doit(image, segs, model, clip, vae, rescale_factor, resampling_method, supersample, rounding_modulus,
              seed, steps, cfg, sampler_name, scheduler, positive, negative, denoise, feather, inpaint_model, noise_mask_feather,
-             upscale_model_opt=None, upscaler_hook_opt=None, scheduler_func_opt=None):
+             upscale_model_opt=None, upscaler_hook_opt=None, scheduler_func_opt=None,
+             context:execution_context.ExecutionContext=None):
 
         new_image = segs_upscaler.upscaler(image, upscale_model_opt, rescale_factor, resampling_method, supersample, rounding_modulus)
 
@@ -1852,7 +1861,7 @@ class SEGSUpscaler:
 
             seg_seed = seed + i
 
-            enhanced_image = segs_upscaler.img2img_segs(cropped_image, model, clip, vae, seg_seed, steps, cfg, sampler_name, scheduler,
+            enhanced_image = segs_upscaler.img2img_segs(context, cropped_image, model, clip, vae, seg_seed, steps, cfg, sampler_name, scheduler,
                                                         positive, negative, denoise,
                                                         noise_mask=cropped_mask, control_net_wrapper=seg.control_net_wrapper,
                                                         inpaint_model=inpaint_model, noise_mask_feather=noise_mask_feather, scheduler_func_opt=scheduler_func_opt)
@@ -1864,7 +1873,7 @@ class SEGSUpscaler:
                 tensor_paste(new_image, enhanced_image, (left, top), mask)
 
                 if upscaler_hook_opt is not None:
-                    new_image = upscaler_hook_opt.post_paste(new_image)
+                    new_image = upscaler_hook_opt.post_paste(context, new_image)
 
         enhanced_img = tensor_convert_rgb(new_image)
 

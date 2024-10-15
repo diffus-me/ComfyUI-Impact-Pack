@@ -1,3 +1,4 @@
+import execution_context
 import nodes
 from comfy.k_diffusion import sampling as k_diffusion_sampling
 from comfy import samplers
@@ -111,7 +112,7 @@ def ksampler(sampler_name, total_sigmas, extra_options={}, inpaint_options={}):
 
 
 # modified version of SamplerCustom.sample
-def sample_with_custom_noise(model, add_noise, noise_seed, cfg, positive, negative, sampler, sigmas, latent_image, noise=None, callback=None):
+def sample_with_custom_noise(context: execution_context.ExecutionContext, model, add_noise, noise_seed, cfg, positive, negative, sampler, sigmas, latent_image, noise=None, callback=None):
     latent = latent_image
     latent_image = latent["samples"]
 
@@ -132,7 +133,7 @@ def sample_with_custom_noise(model, add_noise, noise_seed, cfg, positive, negati
         noise_mask = latent["noise_mask"]
 
     x0_output = {}
-    preview_callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
+    preview_callback = latent_preview.prepare_callback(context, model, sigmas.shape[-1] - 1, x0_output)
 
     if callback is not None:
         def touched_callback(step, x0, x, total_steps):
@@ -176,7 +177,7 @@ def sample_with_custom_noise(model, add_noise, noise_seed, cfg, positive, negati
 
 
 # When sampling one step at a time, it mitigates the problem. (especially for _sde series samplers)
-def separated_sample(model, add_noise, seed, steps, cfg, sampler_name, scheduler, positive, negative,
+def separated_sample(context: execution_context.ExecutionContext, model, add_noise, seed, steps, cfg, sampler_name, scheduler, positive, negative,
                      latent_image, start_at_step, end_at_step, return_with_leftover_noise, sigma_ratio=1.0, sampler_opt=None, noise=None, callback=None, scheduler_func=None):
 
     if scheduler_func is not None:
@@ -211,7 +212,7 @@ def separated_sample(model, add_noise, seed, steps, cfg, sampler_name, scheduler
     if len(sigmas) == 0 or (len(sigmas) == 1 and sigmas[0] == 0):
         return latent_image
     
-    res = sample_with_custom_noise(model, add_noise, seed, cfg, positive, negative, impact_sampler, sigmas, latent_image, noise=noise, callback=callback)
+    res = sample_with_custom_noise(context, model, add_noise, seed, cfg, positive, negative, impact_sampler, sigmas, latent_image, noise=noise, callback=callback)
 
     if return_with_leftover_noise:
         return res[0]
@@ -219,15 +220,15 @@ def separated_sample(model, add_noise, seed, steps, cfg, sampler_name, scheduler
         return res[1]
 
 
-def impact_sample(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise=1.0, sigma_ratio=1.0, sampler_opt=None, noise=None, scheduler_func=None):
+def impact_sample(context, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise=1.0, sigma_ratio=1.0, sampler_opt=None, noise=None, scheduler_func=None):
     advanced_steps = math.floor(steps / denoise)
     start_at_step = advanced_steps - steps
     end_at_step = start_at_step + steps
-    return separated_sample(model, True, seed, advanced_steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
+    return separated_sample(context, model, True, seed, advanced_steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
                             start_at_step, end_at_step, False, scheduler_func=scheduler_func)
 
 
-def ksampler_wrapper(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise,
+def ksampler_wrapper(context, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise,
                      refiner_ratio=None, refiner_model=None, refiner_clip=None, refiner_positive=None, refiner_negative=None, sigma_factor=1.0, noise=None, scheduler_func=None):
 
     if refiner_ratio is None or refiner_model is None or refiner_clip is None or refiner_positive is None or refiner_negative is None:
@@ -238,7 +239,7 @@ def ksampler_wrapper(model, seed, steps, cfg, sampler_name, scheduler, positive,
         start_at_step = advanced_steps - steps
         end_at_step = start_at_step + steps
 
-        refined_latent = separated_sample(model, True, seed, advanced_steps, cfg, sampler_name, scheduler,
+        refined_latent = separated_sample(context, model, True, seed, advanced_steps, cfg, sampler_name, scheduler,
                                           positive, negative, latent_image, start_at_step, end_at_step, False,
                                           sigma_ratio=sigma_factor, noise=noise, scheduler_func=scheduler_func)
     else:
@@ -247,7 +248,7 @@ def ksampler_wrapper(model, seed, steps, cfg, sampler_name, scheduler, positive,
         end_at_step = start_at_step + math.floor(steps * (1.0 - refiner_ratio))
 
         # print(f"pre: {start_at_step} .. {end_at_step} / {advanced_steps}")
-        temp_latent = separated_sample(model, True, seed, advanced_steps, cfg, sampler_name, scheduler,
+        temp_latent = separated_sample(context, model, True, seed, advanced_steps, cfg, sampler_name, scheduler,
                                        positive, negative, latent_image, start_at_step, end_at_step, True,
                                        sigma_ratio=sigma_factor, noise=noise, scheduler_func=scheduler_func)
 
@@ -261,7 +262,7 @@ def ksampler_wrapper(model, seed, steps, cfg, sampler_name, scheduler, positive,
             temp_latent = latent_compositor.composite(latent_image, temp_latent, 0, 0, False, latent_image['noise_mask'])[0]
 
         # print(f"post: {end_at_step} .. {advanced_steps + 1} / {advanced_steps}")
-        refined_latent = separated_sample(refiner_model, False, seed, advanced_steps, cfg, sampler_name, scheduler,
+        refined_latent = separated_sample(context, refiner_model, False, seed, advanced_steps, cfg, sampler_name, scheduler,
                                           refiner_positive, refiner_negative, temp_latent, end_at_step, advanced_steps + 1, False,
                                           sigma_ratio=sigma_factor, scheduler_func=scheduler_func)
 
@@ -280,7 +281,7 @@ class KSamplerAdvancedWrapper:
         model, cfg, sampler_name, scheduler, _, _, _ = self.params
         return KSamplerAdvancedWrapper(model, cfg, sampler_name, scheduler, positive, negative, self.sampler_opt)
 
-    def sample_advanced(self, add_noise, seed, steps, latent_image, start_at_step, end_at_step, return_with_leftover_noise, hook=None,
+    def sample_advanced(self, context, add_noise, seed, steps, latent_image, start_at_step, end_at_step, return_with_leftover_noise, hook=None,
                         recovery_mode="ratio additional", recovery_sampler="AUTO", recovery_sigma_ratio=1.0, noise=None):
 
         model, cfg, sampler_name, scheduler, positive, negative, sigma_factor = self.params
@@ -303,7 +304,7 @@ class KSamplerAdvancedWrapper:
 
         try:
             if sigma_ratio > 0:
-                latent_image = separated_sample(model, add_noise, seed, steps, cfg, sampler_name, scheduler,
+                latent_image = separated_sample(context, model, add_noise, seed, steps, cfg, sampler_name, scheduler,
                                                 positive, negative, latent_image, start_at_step, end_at_step,
                                                 return_with_leftover_noise, sigma_ratio=sigma_ratio * sigma_factor,
                                                 sampler_opt=self.sampler_opt, noise=noise, scheduler_func=self.scheduler_func)
@@ -328,7 +329,7 @@ class KSamplerAdvancedWrapper:
             latent_image = latent_compositor.composite(base_image, latent_image, 0, 0, False, noise_mask)[0]
 
             try:
-                latent_image = separated_sample(model, add_noise, seed, steps, cfg, recovery_sampler, scheduler,
+                latent_image = separated_sample(context, model, add_noise, seed, steps, cfg, recovery_sampler, scheduler,
                                                 positive, negative, latent_image, start_at_step-compensate, end_at_step, return_with_leftover_noise,
                                                 sigma_ratio=recovery_sigma_ratio * sigma_factor, sampler_opt=self.sampler_opt, scheduler_func=self.scheduler_func)
             except ValueError as e:

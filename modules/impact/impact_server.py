@@ -4,6 +4,7 @@ import traceback
 
 from aiohttp import web
 
+import execution_context
 import impact
 import folder_paths
 
@@ -65,7 +66,7 @@ async def sam_prepare(request):
     global sam_predictor
     global last_prepare_data
     data = await request.json()
-
+    context = execution_context.ExecutionContext(request)
     with sam_lock:
         if last_prepare_data is not None and last_prepare_data == data:
             # already loaded: skip -- prevent redundant loading
@@ -81,11 +82,12 @@ async def sam_prepare(request):
 
         print(f"[INFO] ComfyUI-Impact-Pack: Loading SAM model '{impact_pack.model_path}'")
 
-        filename, image_dir = folder_paths.annotated_filepath(data["filename"])
+        filename, image_dir = folder_paths.annotated_filepath(data["filename"], context.user_hash)
 
         if image_dir is None:
             typ = data['type'] if data['type'] != '' else 'output'
-            image_dir = folder_paths.get_directory_by_type(typ)
+            user_hash = request.headers.get('x-diffus-user-hash', '')
+            image_dir = folder_paths.get_directory_by_type(typ, user_hash)
             if data['subfolder'] is not None and data['subfolder'] != '':
                 image_dir += f"/{data['subfolder']}"
 
@@ -214,16 +216,18 @@ async def segs_picker(request):
 
 @PromptServer.instance.routes.get("/view/validate")
 async def view_validate(request):
+    context = execution_context.ExecutionContext(request)
     if "filename" in request.rel_url.query:
         filename = request.rel_url.query["filename"]
         subfolder = request.rel_url.query["subfolder"]
-        filename, base_dir = folder_paths.annotated_filepath(filename)
+        filename, base_dir = folder_paths.annotated_filepath(filename, context.user_hash)
 
         if filename == '' or filename[0] == '/' or '..' in filename:
             return web.Response(status=400)
 
         if base_dir is None:
-            base_dir = folder_paths.get_input_directory()
+            user_hash = request.headers.get('x-diffus-user-hash', '')
+            base_dir = folder_paths.get_input_directory(user_hash)
 
         file = os.path.join(base_dir, subfolder, filename)
 
@@ -250,24 +254,26 @@ async def view_validate(request):
 
 @PromptServer.instance.routes.get("/impact/set/pb_id_image")
 async def set_previewbridge_image(request):
+    context = execution_context.ExecutionContext(request)
     try:
         if "filename" in request.rel_url.query:
             node_id = request.rel_url.query["node_id"]
             filename = request.rel_url.query["filename"]
             path_type = request.rel_url.query["type"]
             subfolder = request.rel_url.query["subfolder"]
-            filename, output_dir = folder_paths.annotated_filepath(filename)
+            filename, output_dir = folder_paths.annotated_filepath(filename, context.user_hash)
+            user_hash = request.headers.get('x-diffus-user-hash', '')
 
             if filename == '' or filename[0] == '/' or '..' in filename:
                 return web.Response(status=400)
 
             if output_dir is None:
                 if path_type == 'input':
-                    output_dir = folder_paths.get_input_directory()
+                    output_dir = folder_paths.get_input_directory(user_hash)
                 elif path_type == 'output':
-                    output_dir = folder_paths.get_output_directory()
+                    output_dir = folder_paths.get_output_directory(user_hash)
                 else:
-                    output_dir = folder_paths.get_temp_directory()
+                    output_dir = folder_paths.get_temp_directory(user_hash)
 
             file = os.path.join(output_dir, subfolder, filename)
             item = {
